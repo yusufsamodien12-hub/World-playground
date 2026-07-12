@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", sans-serif;
+  --font-mono: "Fira Code", monospace;
+}
+
+@keyframes scan {
+  from { transform: translateY(-100%); }
+  to { transform: translateY(100%); }
+}
+
+@keyframes border-glow {
+  0%, 100% { border-color: rgba(56, 189, 248, 0.2); }
+  50% { border-color: rgba(56, 189, 248, 0.5); }
+}
+
+@keyframes glow {
+  0%, 100% { filter: drop-shadow(0 0 5px #00f2ff); }
+  50% { filter: drop-shadow(0 0 15px #00f2ff); }
+}
+
+.panel-glow {
+  animation: border-glow 4s ease-in-out infinite;
+}
+
+.sao-font {
+  font-family: 'Courier New', Courier, monospace;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background-color: #050505;
+}
+
+canvas {
+  display: block;
+}

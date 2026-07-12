@@ -1,0 +1,5 @@
+{
+  "name": "Underworld Simulation Alpha",
+  "description": "A browser-based autonomous world simulation inspired by SAO's Underworld, featuring an AI agent that learns to build and evolve its environment through trial, error, and LLM-driven reasoning.",
+  "requestFramePermissions": []
+}
