@@ -12,6 +12,34 @@ import {
   GroundingLink, KnowledgeCategory, PlanStep
 } from './types';
 
+const BLOCKFORGE_DESIGN_URL = ((import.meta as any)?.env?.VITE_BLOCKFORGE_DESIGN_URL as string | undefined)
+  ?? 'https://blockforge.yusufsamodien12.workers.dev/design';
+
+// This agent's job is to DECIDE placement and grow the knowledge base -- the
+// actual 3D mesh for every object is delegated to BlockForge's /design tool
+// (Mistral + PolyHaven-backed material/shape research). Every call is tagged
+// with source: 'world-playground' so BlockForge can show a live "agent is
+// using this tool" indicator. Falls back to undefined on any failure so the
+// caller can apply its own local fallback mesh instead of breaking the loop.
+async function fetchCustomMeshFromBlockforge(description: string): Promise<CustomMeshSpec | undefined> {
+  try {
+    const resp = await fetch(BLOCKFORGE_DESIGN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description, source: 'world-playground' }),
+    });
+    if (!resp.ok) {
+      console.warn(`BlockForge /design returned ${resp.status} for "${description}"`);
+      return undefined;
+    }
+    const data: any = await resp.json();
+    return sanitizeCustomMesh(data?.spec);
+  } catch (err) {
+    console.warn('BlockForge /design request failed:', err);
+    return undefined;
+  }
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function describeActivePlan(activePlan?: ConstructionPlan): string {
@@ -406,12 +434,14 @@ function buildSystemInstruction(): string {
       ]
     }
 
-    MATERIAL & SHAPE RESEARCH (PRECISION MESH PROTOCOL):
-    - When a structure deserves a specific form, include a "customMesh" object that describes the material and primitive geometry.
-    - "customMesh.materialResearch" should be a short sentence describing why the chosen material fits the structure.
-    - "customMesh.parts" is a list of 1-6 simple primitives that combine into the object.
-    - Each primitive must have safe numeric values: dimensions stay between 0.05 and 6 meters.
-    - Omit customMesh for plain defaults unless you have a clear, intentional design.
+    MESH GENERATION (DELEGATED TO BLOCKFORGE):
+    - You do NOT need to design a "customMesh" yourself. BlockForge (a separate
+      design tool) automatically researches the material and geometry and builds
+      the mesh for every object you place, based on its "objectType"/"label".
+    - Feel free to invent a specific decorative or thematic "objectType" outside
+      the standard set (e.g. "gold brick", "carved statue", "lantern post") --
+      BlockForge will design it for you. Your job is only to DECIDE placement,
+      reason about it, and grow the knowledge base.
 
     FORM-SPACE-ORDER TEACHINGS:
     - Use the vocabulary of architecture: point, line, plane, volume, form, space, order, solid, transformation.
@@ -456,8 +486,7 @@ function buildSystemInstruction(): string {
       "outcomeSummary": "Final building intent and expected architectural result",
       "connectivityConfirmation": "All components are connected in a single coherent structure.",
       "decisionFactors": ["structural integrity", "spacing", "terrain alignment", "material efficiency"],
-      "plan": { "objective": "Building name/purpose", "steps": [{ "id": "1", "type": "type", "position": [x,y,z], "label": "descriptive label", "status": "active|pending", "customMesh": { "materialResearch": "One sentence", "parts": [{ "geometry": "box", "args": [0.5, 1.2, 0.5], "position": [0, 0.6, 0], "rotation": [0, 0, 0], "material": { "color": "#8b5e3c", "roughness": 0.8, "metalness": 0.05 } }] } }] },
-      "customMesh": { "materialResearch": "One sentence on material choice", "parts": [{ "geometry": "box", "args": [0.5, 1.2, 0.5], "position": [0, 0.6, 0], "rotation": [0, 0, 0], "material": { "color": "#8b5e3c", "roughness": 0.8, "metalness": 0.05 } }] }
+      "plan": { "objective": "Building name/purpose", "steps": [{ "id": "1", "type": "type", "position": [x,y,z], "label": "descriptive label", "status": "active|pending" }] }
     }
   `;
 }
@@ -622,12 +651,17 @@ export async function decideNextAction(params: DecideNextActionParams): Promise<
     }
 
     const links: GroundingLink[] = [];
-    const sanitizedCustomMesh = sanitizeCustomMesh(parsed.customMesh) ?? buildFallbackCustomMesh(parsed.objectType as WorldObjectType);
+    // The agent's job is to decide placement + reasoning; BlockForge is
+    // always the mesh source. Only fall back to the local hardcoded mesh
+    // if BlockForge itself is unreachable, so the loop never stalls.
+    const sanitizedCustomMesh = await fetchCustomMeshFromBlockforge(parsed.taskLabel || parsed.objectType)
+      ?? buildFallbackCustomMesh(parsed.objectType as WorldObjectType);
 
     if (parsed.plan?.steps && Array.isArray(parsed.plan.steps)) {
-      parsed.plan.steps = parsed.plan.steps.map((step: any) => ({
-        ...step,
-        customMesh: sanitizeCustomMesh(step?.customMesh) ?? buildFallbackCustomMesh(step?.type as WorldObjectType),
+      parsed.plan.steps = await Promise.all(parsed.plan.steps.map(async (step: any) => {
+        const customMesh = await fetchCustomMeshFromBlockforge(step?.label || step?.type)
+          ?? buildFallbackCustomMesh(step?.type as WorldObjectType);
+        return { ...step, customMesh };
       }));
     }
 
