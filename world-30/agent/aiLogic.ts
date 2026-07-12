@@ -573,9 +573,18 @@ export async function decideNextAction(params: DecideNextActionParams): Promise<
     let parsed: any;
 
     try {
+      // JSON5 natively accepts single-quoted strings, so try the raw
+      // extracted block first. This avoids the more aggressive repair
+      // regexes below, which blindly pair up single quotes and can corrupt
+      // text containing apostrophes/contractions (e.g. "building's roof").
       const JSON5 = (await import('json5')).default;
-      parsed = JSON5.parse(candidateJson);
-    } catch (parseError) {
+      parsed = JSON5.parse(extractedJson);
+    } catch (rawParseError) {
+      console.warn('Raw JSON5 parse failed, trying repaired response:', rawParseError);
+      try {
+        const JSON5 = (await import('json5')).default;
+        parsed = JSON5.parse(candidateJson);
+      } catch (parseError) {
       console.warn('AI JSON5 parse failed, trying fallback:', parseError);
       const fallbackCandidate = candidateJson
         .replace(/(['"])?([a-zA-Z0-9_]+)(['"])?\s*:/g, '"$2":')
@@ -594,6 +603,7 @@ export async function decideNextAction(params: DecideNextActionParams): Promise<
           });
         const JSON5 = (await import('json5')).default;
         parsed = JSON5.parse(moreAggressive);
+      }
       }
     }
 
