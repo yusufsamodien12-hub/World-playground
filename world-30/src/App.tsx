@@ -1,6 +1,7 @@
-import React, { useState, useCallback, Suspense, lazy } from 'react';
+import React, { useState, useCallback, useEffect, useRef, Suspense, lazy } from 'react';
 import { WorldObject, WorldObjectType } from './types';
 import { generateId } from './services/id';
+import { ArchitectAgent } from '../agent';
 
 const SimulationCanvas = lazy(() => import('../components/SimulationCanvas'));
 
@@ -9,6 +10,8 @@ const getTerrainHeight = (x: number, z: number) => {
                  (Math.sin(x * 0.02) * Math.cos(z * 0.02) * 5.0);
   return Number(height.toFixed(3));
 };
+
+const AGENT_PROXY_URL = import.meta.env.VITE_PROXY_URL as string | undefined;
 
 const OBJECT_TYPES: { type: WorldObjectType; label: string; icon: string }[] = [
   { type: 'modular_unit', label: 'Building', icon: '🏗️' },
@@ -26,6 +29,46 @@ const OBJECT_TYPES: { type: WorldObjectType; label: string; icon: string }[] = [
 function App() {
   const [objects, setObjects] = useState<WorldObject[]>([]);
   const [avatarPos, setAvatarPos] = useState<[number, number, number]>([0, getTerrainHeight(0, 0), 0]);
+  const [agentRunning, setAgentRunning] = useState(false);
+  const [agentTask, setAgentTask] = useState('Idle');
+  const agentRef = useRef<ArchitectAgent | null>(null);
+
+  // Autonomous agent: builds structures on its own by calling the World26
+  // Mistral proxy, mirroring the same decision loop used by World-Agent.
+  useEffect(() => {
+    const agent = new ArchitectAgent(
+      {
+        proxyUrl: AGENT_PROXY_URL,
+        terrainHeightFn: getTerrainHeight,
+        autoStart: false,
+        stepInterval: 5000,
+      },
+      {
+        onStateChange: (state) => {
+          setObjects(state.objects as unknown as WorldObject[]);
+          if (state.objects.length > 0) {
+            const last = state.objects[state.objects.length - 1];
+            setAvatarPos(last.position);
+          }
+        },
+        onTaskUpdate: (task) => setAgentTask(task),
+      }
+    );
+    agentRef.current = agent;
+    return () => agent.stop();
+  }, []);
+
+  const toggleAgent = useCallback(() => {
+    const agent = agentRef.current;
+    if (!agent) return;
+    if (agent.getIsRunning()) {
+      agent.stop();
+      setAgentRunning(false);
+    } else {
+      agent.start();
+      setAgentRunning(true);
+    }
+  }, []);
 
   const placeObject = useCallback((type: WorldObjectType) => {
     const angle = Math.random() * Math.PI * 2;
@@ -66,6 +109,23 @@ function App() {
       {/* Minimal top-left title */}
       <div className="absolute top-4 left-4 z-10">
         <div className="text-xs font-black tracking-[0.3em] text-white/30 uppercase">World-30</div>
+      </div>
+
+      {/* Agent control */}
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-3">
+        <button
+          onClick={toggleAgent}
+          className={`px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider border transition-all ${
+            agentRunning
+              ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-300'
+              : 'bg-white/5 border-white/10 text-white/50 hover:bg-white/10'
+          }`}
+        >
+          {agentRunning ? '● Agent Building' : 'Start Agent'}
+        </button>
+        {agentRunning && (
+          <div className="text-xs font-mono text-white/40 max-w-xs truncate">{agentTask}</div>
+        )}
       </div>
 
       {/* Object count */}
