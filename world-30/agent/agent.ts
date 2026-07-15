@@ -406,8 +406,32 @@ export class ArchitectAgent {
       // Execute the action
       if (decision.action === 'PLACE') {
         this.executePlaceAction(decision);
+      } else if (decision.action === 'CREATE') {
+        this.executePlaceAction(decision); // CREATE reuses the same placement logic
+      } else if (decision.action === 'ROAM' || decision.action === 'OBSERVE') {
+        if (decision.avatarTarget) {
+          this.state.avatarTarget = decision.avatarTarget;
+          this.addLog(`Moving toward ${this.formatPosition(decision.avatarTarget)}: ${decision.reason}`, 'action');
+        } else if (decision.position) {
+          this.state.avatarTarget = decision.position;
+          this.addLog(`Moving toward ${this.formatPosition(decision.position)}: ${decision.reason}`, 'action');
+        } else {
+          // Generate a random roam target nearby
+          const currentPos = this.state.objects.length > 0
+            ? this.state.objects[this.state.objects.length - 1].position
+            : [0, 0, 0];
+          const angle = Math.random() * Math.PI * 2;
+          const dist = 5 + Math.random() * 15;
+          this.state.avatarTarget = [
+            currentPos[0] + Math.cos(angle) * dist,
+            this.config.terrainHeightFn(currentPos[0] + Math.cos(angle) * dist, currentPos[2] + Math.sin(angle) * dist),
+            currentPos[2] + Math.sin(angle) * dist,
+          ];
+          this.addLog(`Roaming toward ${this.formatPosition(this.state.avatarTarget)}: ${decision.reason}`, 'action');
+        }
       } else if (decision.action === 'MOVE' && decision.position) {
-        this.addLog(`Relocating: Optimizing sector positioning.`, 'action');
+        this.state.avatarTarget = decision.position;
+        this.addLog(`Relocating: ${decision.reason}`, 'action');
       } else {
         this.addLog(`Simulation standby: ${decision.reason}`, 'action');
       }

@@ -8,7 +8,7 @@ export type KnowledgeCategory = 'Infrastructure' | 'Energy' | 'Environment' | 'A
 export type MeshGeometryKind = 'box' | 'cylinder' | 'cone' | 'sphere' | 'torus';
 export type LogType = 'action' | 'learning' | 'error' | 'success' | 'thinking';
 export type NetworkStatus = 'offline' | 'uplink_active' | 'syncing' | 'error';
-export type ActionType = 'PLACE' | 'MOVE' | 'WAIT';
+export type ActionType = 'PLACE' | 'MOVE' | 'WAIT' | 'ROAM' | 'OBSERVE' | 'CREATE';
 
 export interface MeshMaterialSpec {
   color: string;
@@ -98,6 +98,7 @@ export interface AIActionResponse {
   action: ActionType;
   objectType?: WorldObjectType;
   position?: [number, number, number];
+  avatarTarget?: [number, number, number]; // ROAM/OBSERVE target for the avatar to walk toward
   reason: string;
   reasoningSteps: string[];
   decisionFactors?: string[];
@@ -121,6 +122,7 @@ export interface AgentState {
   networkStatus: NetworkStatus;
   activePlan?: ConstructionPlan;
   apiMetrics: ApiMetric[];
+  avatarTarget?: [number, number, number]; // current roam/observe target the avatar moves toward
 }
 
 export interface AgentConfig {

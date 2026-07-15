@@ -1,14 +1,17 @@
 import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { WorldObject } from '../src/types';
+import { resolveCollision } from './CollisionSystem';
 
 interface AvatarProps {
   position: [number, number, number];
   targetPosition: [number, number, number] | null;
   isThinking?: boolean;
+  objects?: WorldObject[];
 }
 
-export const Avatar: React.FC<AvatarProps> = ({ position, targetPosition, isThinking }) => {
+export const Avatar: React.FC<AvatarProps> = ({ position, targetPosition, isThinking, objects = [] }) => {
   const meshRef = useRef<THREE.Group>(null);
   const ringRef = useRef<THREE.Mesh>(null);
   const scannerRef = useRef<THREE.Mesh>(null);
@@ -20,10 +23,16 @@ export const Avatar: React.FC<AvatarProps> = ({ position, targetPosition, isThin
   useFrame((state, delta) => {
     if (meshRef.current) {
       targetVec.set(...position);
-      const prevPos = currentPos.current.clone();
-      currentPos.current.lerp(targetVec, 0.1);
+      // Resolve collisions before applying movement
+      const desired: [number, number, number] = [
+        THREE.MathUtils.lerp(currentPos.current.x, targetVec.x, 0.1),
+        THREE.MathUtils.lerp(currentPos.current.y, targetVec.y, 0.1),
+        THREE.MathUtils.lerp(currentPos.current.z, targetVec.z, 0.1),
+      ];
+      const resolved = resolveCollision(desired, objects);
+      currentPos.current.set(resolved[0], resolved[1], resolved[2]);
       meshRef.current.position.copy(currentPos.current);
-      const movement = new THREE.Vector3().subVectors(currentPos.current, prevPos);
+      const movement = new THREE.Vector3(resolved[0] - targetVec.x, 0, resolved[2] - targetVec.z);
       meshRef.current.rotation.x = THREE.MathUtils.lerp(meshRef.current.rotation.x, movement.z * 5, 0.1);
       meshRef.current.rotation.z = THREE.MathUtils.lerp(meshRef.current.rotation.z, -movement.x * 5, 0.1);
       meshRef.current.position.y += Math.sin(state.clock.elapsedTime * 2) * 0.15;
