@@ -1,3 +1,4 @@
 {
+  "rootDirectory": "world-30",
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }
