@@ -7,7 +7,7 @@ export type WorldObjectType = 'wall' | 'roof' | 'door' | 'crop' | 'tree' | 'well
 export type KnowledgeCategory = 'Infrastructure' | 'Energy' | 'Environment' | 'Architecture' | 'Synthesis';
 export type MeshGeometryKind = 'box' | 'cylinder' | 'cone' | 'sphere' | 'torus';
 export type LogType = 'action' | 'learning' | 'error' | 'success' | 'thinking';
-export type NetworkStatus = 'offline' | 'uplink_active' | 'syncing' | 'error';
+export type NetworkStatus = 'offline' | 'connected' | 'syncing' | 'error';
 export type ActionType = 'PLACE' | 'MOVE' | 'WAIT' | 'ROAM' | 'OBSERVE' | 'CREATE';
 
 export interface MeshMaterialSpec {
@@ -83,7 +83,7 @@ export interface ProgressionStats {
   complexityLevel: number;
   structuresCompleted: number;
   totalBlocks: number;
-  unlockedBlueprints: string[];
+  availablePatterns: string[];
 }
 
 export interface ApiMetric {

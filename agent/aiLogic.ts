@@ -1,5 +1,5 @@
 /**
- * Agent AI Logic - Architect-OS intelligence for the World26 simulation.
+ * Agent AI Logic - Core decision-making for the world simulation.
  * Handles communication with Mistral AI, prompt construction, response parsing,
  * plan validation, and mesh sanitization.
  * 
