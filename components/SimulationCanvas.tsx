@@ -243,7 +243,7 @@ const SimulationCanvas: React.FC<SimulationCanvasProps> = ({
         />
 
         <Terrain />
-        <gridHelper args={[1000, 100, '#1e293b', '#0f172a']} position={[0, -0.05, 0]} />
+        <gridHelper args={[1000, 1000, '#1e293b', '#0f172a']} position={[0, -0.05, 0]} />
 
         <Sparkles count={120} scale={45} size={1.2} speed={0.3} color="#38bdf8" opacity={0.15} />
         <Sparkles count={40} scale={30} size={2.5} speed={0.45} color="#f43f5e" opacity={0.16} />

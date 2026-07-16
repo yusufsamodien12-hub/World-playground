@@ -733,7 +733,7 @@ export async function decideNextAction(params: DecideNextActionParams): Promise<
       action: 'WAIT',
       reason: `Error: ${msg}`,
       reasoningSteps: ['Error detected', 'Safe recovery', 'Retry next cycle'],
-      learningNote: `Neural fault: ${msg}`,
+      learningNote: `Wayfarer error: ${msg}`,
       knowledgeCategory: 'Synthesis',
       taskLabel: 'Recovering...',
       connectivityConfirmation: 'Connectivity unavailable due to error.'
