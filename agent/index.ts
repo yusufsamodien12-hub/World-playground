@@ -14,7 +14,6 @@
  */
 
 export { ArchitectAgent } from './agent';
-export { decideNextAction } from './aiLogic';
 export { createMemoryProvider, LocalStorageMemory, ApiMemory } from './memory';
 export { AgentLogger } from './logger';
 export { queryBuildingKnowledge, getArchitectureKnowledgeForPrompt } from './overpass';
@@ -24,8 +23,11 @@ export { queryArtByClassification, queryArtKnowledge, getArtKnowledgeForPrompt }
 // These match the deprecated services/ API so App.tsx can switch its
 // imports to './agent' without changing call sites.
 
-import { DecideNextActionParams } from './aiLogic';
+import { decideNextAction, DecideNextActionParams } from './aiLogic';
 import { AIActionResponse, LogEntry as AgentLogEntry } from './types';
+
+// Re-export so App.tsx can import from '../agent'
+export { decideNextAction } from './aiLogic';
 
 /** @deprecated Switch to decideNextAction(params) with object argument */
 export async function decideNextActionLegacy(
