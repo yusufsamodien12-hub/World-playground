@@ -12,6 +12,7 @@ import {
   GroundingLink, KnowledgeCategory, PlanStep, CategoryMastery
 } from './types';
 import { getArchitectureKnowledgeForPrompt } from './overpass';
+import { getArtKnowledgeForPrompt } from './harvard';
 import * as JSON5 from 'json5';
 
 // ─── BlockForge Tool (MCP-style) ─────────────────────────────────────────
@@ -444,7 +445,8 @@ function buildPrompt(
   knowledgeBase: KnowledgeEntry[],
   activePlan?: ConstructionPlan,
   recentActions?: LogEntry[],
-  architectureKnowledge?: string
+  architectureKnowledge?: string,
+  artKnowledge?: string
 ): string {
   // Terrain context
   const terrainNote = `Terrain at [${currentPos[0].toFixed(1)}, ${currentPos[2].toFixed(1)}] height ${getTerrainHeightSimple(currentPos[0], currentPos[2]).toFixed(2)}m.`;
@@ -533,6 +535,7 @@ function buildPrompt(
     repText,
     diversityScore < 3 ? `\nTIP: You've explored ${diversityScore}/5 knowledge categories. Try learning about: ${gaps.join(', ')}` : '',
     architectureKnowledge ? `\n${architectureKnowledge}` : '',
+    artKnowledge ? `\n${artKnowledge}` : '',
     '',
     'Use the THINKING FRAMEWORK: SCAN \u2192 ANALYZE \u2192 DECIDE \u2192 VERIFY. Choose an action that teaches you something new or builds on existing structures.'
   ].filter(Boolean).join('\n');
@@ -568,7 +571,6 @@ export async function decideNextAction(params: DecideNextActionParams): Promise<
   const systemInstruction = buildSystemInstruction();
 
   // Fetch real-world architectural knowledge from OpenStreetMap
-  // if coordinates are provided (with caching: only every 10 iterations)
   let architectureKnowledge: string | undefined;
   if (realWorldLocation) {
     try {
@@ -582,7 +584,15 @@ export async function decideNextAction(params: DecideNextActionParams): Promise<
     }
   }
 
-  const prompt = buildPrompt(currentGoal, currentPos, worldObjects, knowledgeBase, activePlan, recentActions, architectureKnowledge);
+  // Fetch art & artifact knowledge from Harvard Art Museums
+  let artKnowledge: string | undefined;
+  try {
+    artKnowledge = await getArtKnowledgeForPrompt();
+  } catch {
+    // Non-fatal
+  }
+
+  const prompt = buildPrompt(currentGoal, currentPos, worldObjects, knowledgeBase, activePlan, recentActions, architectureKnowledge, artKnowledge);
 
   const apiKey = (mistralApiKey ?? '').toString().trim();
   const proxy = proxyUrl;
