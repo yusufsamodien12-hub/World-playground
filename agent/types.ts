@@ -8,7 +8,7 @@ export type KnowledgeCategory = 'Design' | 'Nature' | 'Systems' | 'Discovery' | 
 export type MeshGeometryKind = 'box' | 'cylinder' | 'cone' | 'sphere' | 'torus';
 export type LogType = 'action' | 'learning' | 'error' | 'success' | 'thinking';
 export type NetworkStatus = 'offline' | 'connected' | 'syncing' | 'error';
-export type ActionType = 'PLACE' | 'MOVE' | 'WAIT' | 'ROAM' | 'OBSERVE' | 'CREATE';
+export type ActionType = 'PLACE' | 'MOVE' | 'WAIT' | 'ROAM' | 'OBSERVE' | 'CREATE' | 'REFLECT';
 
 export interface MeshMaterialSpec {
   color: string;

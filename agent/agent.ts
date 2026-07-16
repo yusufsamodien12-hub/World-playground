@@ -381,6 +381,8 @@ export class ArchitectAgent {
         mistralApiKey: this.config.mistralApiKey || undefined,
         blockforgeUrl: this.config.blockforgeUrl || undefined,
         recentActions,
+        // Fetch real-world architectural patterns from London by default
+        realWorldLocation: { lat: 51.5, lon: -0.1, radius: 500 },
       });
 
       const apiLatency = Date.now() - apiStartTime;
