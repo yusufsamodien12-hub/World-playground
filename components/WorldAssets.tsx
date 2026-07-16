@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useLoader } from '@react-three/fiber';
+import { TextureLoader } from 'three';
 import { CustomMeshSpec, MeshPart, WorldObjectType } from '../src/types';
 import * as THREE from 'three';
 
@@ -29,6 +30,31 @@ const GhostMaterial: React.FC = () => {
       emissive="#38bdf8"
       emissiveIntensity={0.8}
       side={THREE.DoubleSide}
+    />
+  );
+};
+
+/** Material that loads a texture if textureUrl is provided, falls back to flat color */
+const PartMaterial: React.FC<{
+  color: string;
+  roughness?: number;
+  metalness?: number;
+  emissive?: string;
+  emissiveIntensity?: number;
+  textureUrl?: string;
+}> = ({ color, roughness = 0.5, metalness = 0.2, emissive, emissiveIntensity, textureUrl }) => {
+  const texture = textureUrl
+    ? useLoader(TextureLoader, textureUrl)
+    : null;
+
+  return (
+    <meshStandardMaterial
+      map={texture}
+      color={texture ? 0xffffff : color}
+      roughness={roughness}
+      metalness={metalness}
+      emissive={emissive}
+      emissiveIntensity={emissiveIntensity}
     />
   );
 };
@@ -70,12 +96,13 @@ const CustomMeshRenderer: React.FC<{
         {isGhost ? (
           <GhostMaterial />
         ) : (
-          <meshStandardMaterial
+          <PartMaterial
             color={part.material.color}
             roughness={part.material.roughness}
             metalness={part.material.metalness}
             emissive={part.material.emissive}
             emissiveIntensity={part.material.emissiveIntensity}
+            textureUrl={part.material.textureUrl}
           />
         )}
       </mesh>
