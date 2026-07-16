@@ -37,7 +37,7 @@ const INITIAL_GOAL = 'Build sustainable structures';
 const DEFAULT_STEP_INTERVAL = 4500;
 const DEFAULT_MAX_API_METRICS = 20;
 
-const VALID_PLAN_TYPES: WorldObjectType[] = [
+const VALID_OBJECT_TYPES: WorldObjectType[] = [
   'wall', 'roof', 'door', 'crop', 'tree', 'well', 'fence', 'modular_unit', 'solar_panel', 'water_collector'
 ];
 
@@ -121,7 +121,7 @@ function normalizeConstructionPlan(
   plan?: ConstructionPlan,
   fallbackObjective?: string
 ): ConstructionPlan | undefined {
-  if (!plan || !Array.isArray(plan.steps) || plan.steps.length < 5 || plan.steps.length > 12) {
+  if (!plan || !Array.isArray(plan.steps) || plan.steps.length < 1 || plan.steps.length > 20) {
     return undefined;
   }
 
@@ -134,7 +134,7 @@ function normalizeConstructionPlan(
       ? step.status
       : (index === 0 ? 'active' : 'pending');
 
-    const type = VALID_PLAN_TYPES.includes(step.type) ? step.type : 'modular_unit';
+    const type = VALID_OBJECT_TYPES.includes(step.type) ? step.type : 'modular_unit';
     const label = typeof step.label === 'string' && step.label.trim().length > 0 ? step.label : `${type} step ${index + 1}`;
 
     return { ...step, type, label, position, status };
@@ -226,6 +226,7 @@ export class ArchitectAgent {
     this.config = {
       proxyUrl: config.proxyUrl ?? '',
       mistralApiKey: config.mistralApiKey ?? '',
+      blockforgeUrl: config.blockforgeUrl ?? '',
       initialGoal: config.initialGoal ?? INITIAL_GOAL,
       stateEndpoint: config.stateEndpoint ?? '',
       terrainHeightFn: config.terrainHeightFn ?? getTerrainHeight,
@@ -328,6 +329,10 @@ export class ArchitectAgent {
       timestamp: Date.now()
     };
     this.state.logs = [...this.state.logs, entry];
+    // Cap logs to prevent unbounded growth
+    if (this.state.logs.length > MAX_LOGS) {
+      this.state.logs = this.state.logs.slice(-MAX_LOGS);
+    }
     this.callbacks.onLog(entry);
     this.emitState();
   }
@@ -364,6 +369,7 @@ export class ArchitectAgent {
     const apiStartTime = Date.now();
 
     try {
+      const recentActions = this.state.logs.slice(-10);
       const decision = await decideNextAction({
         history: this.state.logs,
         worldObjects: this.state.objects,
@@ -373,6 +379,8 @@ export class ArchitectAgent {
         activePlan: this.state.activePlan,
         proxyUrl: this.config.proxyUrl || undefined,
         mistralApiKey: this.config.mistralApiKey || undefined,
+        blockforgeUrl: this.config.blockforgeUrl || undefined,
+        recentActions,
       });
 
       const apiLatency = Date.now() - apiStartTime;
@@ -433,6 +441,22 @@ this.updateTask('Processing response...', 40);
       } else if (decision.action === 'MOVE' && decision.position) {
         this.state.avatarTarget = decision.position;
         this.addLog(`Relocating: ${decision.reason}`, 'action');
+      } else if (decision.action === 'REFLECT') {
+        // Reflect: analyze recent patterns and potentially update the goal
+        this.addLog(`Reflecting: ${decision.reason}`, 'thinking');
+        if (decision.learningNote && decision.learningNote.length > 10) {
+          const newGoal = decision.learningNote.split('.')[0]?.trim();
+          if (newGoal && newGoal.length > 5) {
+            this.state.currentGoal = newGoal;
+            this.addLog(`New goal derived: ${newGoal}`, 'success');
+          }
+        }
+        // Log reasoning steps for the reflection
+        if (decision.reasoningSteps?.length) {
+          for (const step of decision.reasoningSteps) {
+            this.addLog(`  \u2022 ${step}`, 'learning');
+          }
+        }
       } else {
         this.addLog(`Simulation standby: ${decision.reason}`, 'action');
       }
@@ -490,10 +514,33 @@ this.updateTask('Processing response...', 40);
     }
   }
 
-  /** Save current state via memory provider */
+  /** Save current state via memory provider — only if meaningful changes occurred */
+  private lastSaveObjectCount = 0;
+  private lastSaveKnowledgeCount = 0;
+  private saveQueued = false;
+
   async save(): Promise<void> {
-    if (this.state.objects.length > 0 || this.state.knowledgeBase.length > 0) {
+    const objChanged = this.state.objects.length !== this.lastSaveObjectCount;
+    const kbChanged = this.state.knowledgeBase.length !== this.lastSaveKnowledgeCount;
+
+    // Only save when objects or knowledge actually changed
+    if (!objChanged && !kbChanged) return;
+    if (this.state.objects.length === 0 && this.state.knowledgeBase.length === 0) return;
+
+    // Debounce: queue save, only write once per tick
+    if (this.saveQueued) return;
+    this.saveQueued = true;
+
+    // Use microtask delay to coalesce multiple calls in same tick
+    await new Promise(resolve => setTimeout(resolve, 0));
+    this.saveQueued = false;
+
+    try {
       await this.memory.save(this.state);
+      this.lastSaveObjectCount = this.state.objects.length;
+      this.lastSaveKnowledgeCount = this.state.knowledgeBase.length;
+    } catch (err) {
+      this.logger.error('Agent', 'State save failed', err);
     }
   }
 
@@ -508,7 +555,7 @@ this.updateTask('Processing response...', 40);
       this.config.proxyUrl || undefined,
       this.config.stateEndpoint || undefined
     );
-    this.addLog('Architect-OS Reset. Neural pathways cleared.', 'success');
+    this.addLog('System reset.', 'success');
     this.emitState();
   }
 
@@ -553,6 +600,13 @@ this.updateTask('Processing response...', 40);
         availablePatterns: ['Basic', 'Advanced']
       },
       apiMetrics: [],
+      learningMetrics: {
+        categoryMastery: [],
+        totalConcepts: 0,
+        decisionQualityScore: 0,
+        actionDiversity: 0,
+        reinforcedCount: 0
+      }
     };
   }
 
@@ -623,7 +677,7 @@ this.updateTask('Processing response...', 40);
     const y = Number.isFinite(yCandidate) ? yCandidate : this.config.terrainHeightFn(x, z);
     targetPos = normalizePosition([x, y, z]);
 
-    this.addLog(`Synthesis Confirmed: Deploying ${targetType} unit at ${this.formatPosition(targetPos)}.`, 'success');
+    this.addLog(`Placing ${targetType} at ${this.formatPosition(targetPos)}.`, 'success');
 
     const meshResearch = decision.customMesh?.materialResearch || currentStep?.customMesh?.materialResearch;
     if (meshResearch) {
@@ -654,16 +708,34 @@ this.updateTask('Processing response...', 40);
         updatedPlan = { ...updatedPlan, steps, currentStepIndex: nextIdx };
       } else {
         updatedPlan = undefined;
-        this.addLog('Strategic Objective Achieved.', 'success');
+        this.addLog('Building completed.', 'success');
       }
     } else {
       updatedPlan = undefined;
     }
 
-    // Accumulate knowledge
+    // Accumulate knowledge with smart deduplication
     const newKnowledge = [...this.state.knowledgeBase];
     const titleCandidate = decision.learningNote?.split(':')[0]?.trim() || 'Synthesis Logic';
-    if (!newKnowledge.find(k => k.title === titleCandidate)) {
+    
+    // Normalize title for comparison (lowercase, strip numbers/symbols, collapse spaces)
+    const normalize = (s: string) => s.toLowerCase().replace(/[#0-9_|/-]/g, ' ').replace(/\s+/g, ' ').trim();
+    const normalizedNew = normalize(titleCandidate);
+    
+    // Check for near-duplicates: >50% word overlap with existing entries
+    const newWords = new Set(normalizedNew.split(' ').filter(w => w.length > 3));
+    const isDuplicate = newKnowledge.some(k => {
+      const existingWords = new Set(normalize(k.title).split(' ').filter(w => w.length > 3));
+      if (newWords.size === 0 || existingWords.size === 0) return false;
+      const intersection = new Set([...newWords].filter(w => existingWords.has(w)));
+      return intersection.size / Math.max(newWords.size, existingWords.size) > 0.5;
+    });
+
+    // Count entries per category and enforce limits
+    const catCount = newKnowledge.filter(k => k.category === decision.knowledgeCategory).length;
+    const MAX_PER_CATEGORY = 5;
+
+    if (!isDuplicate && catCount < MAX_PER_CATEGORY && newKnowledge.length < MAX_KNOWLEDGE_ENTRIES) {
       newKnowledge.push({
         id: generateId(),
         title: titleCandidate,
@@ -676,18 +748,60 @@ this.updateTask('Processing response...', 40);
     }
 
     // Update state
+    const newTotalBlocks = this.state.progression.totalBlocks + 1;
+    const isStructure = ['modular_unit', 'wall', 'roof', 'door', 'fence'].includes(targetType);
     this.state = {
       ...this.state,
       objects: [...this.state.objects, newObj],
       learningIteration: this.state.learningIteration + 1,
       activePlan: updatedPlan,
       knowledgeBase: newKnowledge,
+      learningMetrics: this.updateLearningMetrics(decision, newKnowledge.length),
       progression: {
         ...this.state.progression,
-        totalBlocks: this.state.progression.totalBlocks + 1,
-        complexityLevel: Math.floor((this.state.progression.totalBlocks + 1) / 5) + 1,
-        structuresCompleted: this.state.progression.structuresCompleted + (targetType === 'modular_unit' ? 1 : 0)
+        totalBlocks: newTotalBlocks,
+        complexityLevel: Math.floor(newTotalBlocks / 5) + 1,
+        structuresCompleted: this.state.progression.structuresCompleted + (isStructure ? 1 : 0)
       }
+    };
+  }
+
+  private updateLearningMetrics(decision: AIActionResponse, totalKnowledgeCount: number): LearningMetrics {
+    const prev = this.state.learningMetrics || {
+      categoryMastery: [], totalConcepts: 0, decisionQualityScore: 0, actionDiversity: 0, reinforcedCount: 0
+    };
+
+    // Update category mastery
+    const cat = decision.knowledgeCategory;
+    const existingIdx = prev.categoryMastery.findIndex(c => c.category === cat);
+    const categoryMastery = [...prev.categoryMastery];
+    if (existingIdx >= 0) {
+      categoryMastery[existingIdx] = {
+        ...categoryMastery[existingIdx],
+        entryCount: categoryMastery[existingIdx].entryCount + 1,
+        masteryScore: Math.min(100, categoryMastery[existingIdx].masteryScore + 5),
+        lastReferenced: this.state.learningIteration
+      };
+    } else {
+      categoryMastery.push({
+        category: cat as any,
+        entryCount: 1,
+        masteryScore: 10,
+        lastReferenced: this.state.learningIteration
+      });
+    }
+
+    // Action diversity: count unique action types in recent logs
+    const recentActions = this.state.logs.slice(-10);
+    const uniqueActions = new Set(recentActions.map(l => l.type));
+    const actionDiversity = Math.min(100, Math.round((uniqueActions.size / 5) * 100));
+
+    return {
+      categoryMastery,
+      totalConcepts: totalKnowledgeCount,
+      decisionQualityScore: Math.min(100, prev.decisionQualityScore + 5),
+      actionDiversity,
+      reinforcedCount: prev.reinforcedCount + 1
     };
   }
 
