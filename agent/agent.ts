@@ -24,7 +24,8 @@ import {
   AgentState, AgentConfig, AgentCallbacks, AIActionResponse,
   WorldObject, LogEntry, KnowledgeEntry, ConstructionPlan,
   WorldObjectType, NetworkStatus, PlanStep, MemoryProvider,
-  ProgressionStats
+  ProgressionStats, LearningMetrics, CategoryMastery,
+  MAX_LOGS, MAX_KNOWLEDGE_ENTRIES
 } from './types';
 import { decideNextAction } from './aiLogic';
 import { createMemoryProvider } from './memory';

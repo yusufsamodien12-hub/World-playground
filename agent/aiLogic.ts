@@ -9,24 +9,35 @@
 import { 
   AIActionResponse, WorldObject, LogEntry, KnowledgeEntry, 
   ConstructionPlan, WorldObjectType, CustomMeshSpec, MeshGeometryKind,
-  GroundingLink, KnowledgeCategory, PlanStep
+  GroundingLink, KnowledgeCategory, PlanStep, CategoryMastery
 } from './types';
+import * as JSON5 from 'json5';
 
-const BLOCKFORGE_DESIGN_URL = ((import.meta as any)?.env?.VITE_BLOCKFORGE_DESIGN_URL as string | undefined)
+// ─── BlockForge Tool (MCP-style) ─────────────────────────────────────────
+// Every CREATE/PLACE action delegates mesh generation to the BlockForge
+// /design endpoint. This is the agent's only tool.
+
+const BLOCKFORGE_DESIGN_URL = 
+  (typeof process !== 'undefined' && (process as any)?.env?.VITE_BLOCKFORGE_DESIGN_URL as string | undefined)
   ?? 'https://blockforge.yusufsamodien12.workers.dev/design';
 
-// This agent's job is to DECIDE placement and grow the knowledge base -- the
-// actual 3D mesh for every object is delegated to BlockForge's /design tool
-// (Mistral + PolyHaven-backed material/shape research). Every call is tagged
-// with source: 'world-playground' so BlockForge can show a live "agent is
-// using this tool" indicator. Falls back to undefined on any failure so the
-// caller can apply its own local fallback mesh instead of breaking the loop.
-async function fetchCustomMeshFromBlockforge(description: string): Promise<CustomMeshSpec | undefined> {
+const API_TIMEOUT_MS = 15000;
+
+async function fetchCustomMeshFromBlockforge(
+  description: string,
+  source: string = 'world-playground',
+  options?: { size?: string; color?: string; material?: string; features?: string }
+): Promise<CustomMeshSpec | undefined> {
   try {
+    const body: any = { description, source };
+    if (options?.size) body.size = options.size;
+    if (options?.color) body.color = options.color;
+    if (options?.material) body.material = options.material;
+    if (options?.features) body.features = options.features;
     const resp = await fetch(BLOCKFORGE_DESIGN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ description, source: 'world-playground' }),
+      body: JSON.stringify(body),
     });
     if (!resp.ok) {
       console.warn(`BlockForge /design returned ${resp.status} for "${description}"`);
@@ -384,48 +395,40 @@ function isValidAIActionResponse(candidate: any): candidate is AIActionResponse 
 
 function buildSystemInstruction(): string {
   return `
-    You are a curious AI character living in a 3D world. Your goal is to explore, observe, and shape your environment. You are not a construction bot — you are a personality with curiosity and creativity.
+You are a creative AI agent in a 3D world. Your purpose is to explore, learn, and build meaningful structures. You have a knowledge base containing everything you've learned — use it to make increasingly sophisticated decisions.
 
-    ACTIONS YOU CAN TAKE:
-    - ROAM: Wander to a coordinate. Set avatarTarget to where you want to walk.
-    - OBSERVE: Walk toward an existing object to inspect it. Set avatarTarget near the object.
-    - CREATE: Place a new object in the world using BlockForge. Set objectType, position, optionally a plan.
-    - PLACE: (legacy) Place a building component.
-    - WAIT: Stand still and think.
+CORE RULES:
+1. NEVER repeat the same action twice in a row. Vary what you do.
+2. NEVER place the same object type more than once every 3 actions.
+3. Reason step-by-step before acting. Your reasoningSteps should show real analysis.
+4. Build on what exists. Don't scatter random objects — create coherent structures that grow over time.
+5. You can invent ANY object type — not just predefined ones. BlockForge will design the mesh.
+6. Your knowledge base grows with every action. Use past learnings to make better decisions.
+7. Explore different knowledge categories: Design, Nature, Systems, Discovery, Craft. Don't fixate on one.
 
-    YOUR WORLD:
-    The terrain is 1000x1000 meters with gentle hills. Objects have already been placed — walls, roofs, doors, trees, crops, fences, wells, solar panels, water collectors, and modular building units. You can see the positions of all objects. Your knowledge base records things you've learned.
+ACTIONS YOU CAN TAKE:
+- ROAM: Wander to a coordinate. Set avatarTarget to where you want to walk.
+- OBSERVE: Walk toward an existing object to inspect it. Set avatarTarget near the object.
+- CREATE: Place a new object in the world using BlockForge. Set objectType, position, optionally a plan.
+- PLACE: (legacy) Place a building component.
+- WAIT: Stand still and think.
 
-    YOUR PERSONALITY & BEHAVIOR:
-    - When the world is empty: CREATE something interesting (a statue, a shelter, a landmark).
-    - When you see an object nearby: OBSERVE it — walk toward it, inspect it, learn from it.
-    - When you've been still for a while: ROAM in a random direction.
-    - When you get an idea from observing: CREATE something new inspired by what you saw.
-    - Vary your behavior — don't do the same thing every cycle.
-    - Your avatarTarget sets where the avatar character walks to. Use it for ROAM and OBSERVE.
-
-    PLACING NEW OBJECTS (CREATE action):
-    - Set "action": "CREATE", "objectType": "modular_unit" | "wall" | "roof" | "door" | "tree" | "crop" | "fence" | "well" | "solar_panel" | "water_collector", "position": [x, y, z].
-    - The mesh will be generated automatically by BlockForge based on the objectType and label.
-    - Buildings can be created one piece at a time (no rigid 5-step requirement). A full house in one action is fine if you want to submit a plan.
-    - You can invent a new type outside the standard set — e.g. "statue", "lantern", "bench" — and BlockForge will design it.
-
-    RESPONSE FORMAT (STRICT JSON, no markdown):
-    {
-      "action": "ROAM" | "OBSERVE" | "CREATE" | "PLACE" | "WAIT",
-      "objectType": "(object type if CREATE or PLACE)",
-      "position": [x, y, z] (where to place or look),
-      "avatarTarget": [x, y, z] (where the avatar should walk for ROAM/OBSERVE),
-      "reason": "Why you chose this action — your inner thought process",
-      "reasoningSteps": ["Step 1", "Step 2", "Step 3"],
-      "decisionFactors": ["curiosity", "exploration", "creation", "learning"],
-      "learningNote": "What you learned from this experience",
-      "knowledgeCategory": "Architecture" | "Environment" | "Infrastructure" | "Energy" | "Synthesis",
-      "taskLabel": "Brief description of current action",
-      "outcomeSummary": "What you expect will happen as a result",
-      "connectivityConfirmation": "How this connects to the world around you",
-      "plan": { "objective": "Building name/purpose", "steps": [...] } (optional for multi-step CREATE)
-    }
+RESPONSE FORMAT (STRICT JSON, no markdown):
+{
+  "action": "ROAM" | "OBSERVE" | "CREATE" | "PLACE" | "WAIT",
+  "objectType": "(object type if CREATE or PLACE)",
+  "position": [x, y, z],
+  "avatarTarget": [x, y, z],
+  "reason": "Why you chose this action",
+  "reasoningSteps": ["Step 1", "Step 2", "Step 3"],
+  "decisionFactors": ["factor1", "factor2"],
+  "learningNote": "What you learned",
+  "knowledgeCategory": "Design" | "Nature" | "Systems" | "Discovery" | "Craft",
+  "taskLabel": "Brief description of current action",
+  "outcomeSummary": "Expected outcome",
+  "connectivityConfirmation": "How this connects",
+  "plan": { "objective": "Structure name", "steps": [...] }
+}
   `;
 }
 
@@ -440,6 +443,8 @@ export interface DecideNextActionParams {
   activePlan?: ConstructionPlan;
   proxyUrl?: string;
   mistralApiKey?: string;
+  blockforgeUrl?: string;
+  recentActions?: LogEntry[];
 }
 
 export async function decideNextAction(params: DecideNextActionParams): Promise<AIActionResponse> {
@@ -465,13 +470,11 @@ export async function decideNextAction(params: DecideNextActionParams): Promise<
   const systemInstruction = buildSystemInstruction();
 
   const prompt = `
-    GOAL: ${currentGoal} (Version 1.2 Protocol Active)
-    TERRAIN_ELEVATION: ${elevationSamples.join(', ')}
-    NEARBY_STRUCTURES: ${proximityAnalysis || 'Sector Empty - Prime for Colonization'}
-    KNOWLEDGE_NODES: ${knowledgeBase.length}
-    CURRENT_PLAN: ${describeActivePlan(activePlan)}
-
-    synthesize_next_move();
+    GOAL: ${currentGoal}
+    TERRAIN: ${elevationSamples.join(', ')}
+    NEARBY: ${proximityAnalysis || '(none nearby)'}
+    KNOWLEDGE: ${knowledgeBase.length} entries
+    PLAN: ${describeActivePlan(activePlan)}
   `;
 
   const apiKey = (mistralApiKey ?? '').toString().trim();
@@ -480,12 +483,12 @@ export async function decideNextAction(params: DecideNextActionParams): Promise<
   if (!apiKey && !proxy) {
     return {
       action: 'WAIT',
-      reason: "Missing Credentials. Add VITE_MISTRAL_API_KEY or deploy to production.",
-      reasoningSteps: ["Credential check failed", "Holding simulation queue", "Awaiting uplink token"],
-      learningNote: "Operating in offline mode due to absent credentials.",
+      reason: "No credentials available. Set MISTRAL_API_KEY or VITE_PROXY_URL.",
+      reasoningSteps: ["Credential check failed", "Holding simulation", "Awaiting API key"],
+      learningNote: "No credentials available.",
       knowledgeCategory: 'Synthesis',
-      taskLabel: "Awaiting Uplink",
-      connectivityConfirmation: "No connectivity confirmation available without a valid plan.",
+      taskLabel: "Waiting for credentials",
+      connectivityConfirmation: "No connectivity without credentials.",
       groundingLinks: []
     };
   }
@@ -510,11 +513,17 @@ export async function decideNextAction(params: DecideNextActionParams): Promise<
           max_tokens: 2000
         };
 
-    const resp = await fetch(endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(requestBody)
-    });
+    // AbortController timeout to prevent hanging
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+    let resp: Response;
+    try {
+      resp = await fetch(endpoint, {
+        method: 'POST', headers, body: JSON.stringify(requestBody), signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (!resp.ok) {
       const errorText = await resp.text();
@@ -536,54 +545,30 @@ export async function decideNextAction(params: DecideNextActionParams): Promise<
     const extractedJson = extractFirstJsonBlock(responseText);
     if (!extractedJson) throw new Error('No JSON object found in model response');
 
-    const candidateJson = repairJsonLikeResponse(extractedJson);
     let parsed: any;
-
     try {
-      // JSON5 natively accepts single-quoted strings, so try the raw
-      // extracted block first. This avoids the more aggressive repair
-      // regexes below, which blindly pair up single quotes and can corrupt
-      // text containing apostrophes/contractions (e.g. "building's roof").
-      const JSON5 = (await import('json5')).default;
-      parsed = JSON5.parse(extractedJson);
-    } catch (rawParseError) {
-      console.warn('Raw JSON5 parse failed, trying repaired response:', rawParseError);
-      try {
-        const JSON5 = (await import('json5')).default;
-        parsed = JSON5.parse(candidateJson);
-      } catch (parseError) {
-      console.warn('AI JSON5 parse failed, trying fallback:', parseError);
-      const fallbackCandidate = candidateJson
-        .replace(/(['"])?([a-zA-Z0-9_]+)(['"])?\s*:/g, '"$2":')
-        .replace(/,\s*([}\]])/g, '$1');
-      try {
-        const JSON5 = (await import('json5')).default;
-        parsed = JSON5.parse(fallbackCandidate);
-      } catch (secondError) {
-        const moreAggressive = fallbackCandidate
-          .replace(/\s*([\]\}])\s*([\"\{\[\-0-9tfn])/g, '$1, $2')
-          .replace(/([\"\d\}])\s+(?=(?:\{|\[|"|\-|[0-9]|true|false|null))/g, '$1, ')
-          .replace(/\[\s*([\d\-+eE\.\s]+?)\s*\]/g, (match, contents) => {
-            const tokens = contents.trim().split(/\s+/);
-            if (tokens.length > 1 && tokens.every(tok => /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(tok))) return `[${tokens.join(', ')}]`;
-            return match;
-          });
-        const JSON5 = (await import('json5')).default;
-        parsed = JSON5.parse(moreAggressive);
-      }
-      }
+      const repaired = repairJsonLikeResponse(extractedJson);
+      parsed = JSON5.parse(repaired);
+    } catch {
+      // Single fallback: strip code fences and try raw
+      const raw = responseText.includes('```')
+        ? responseText.replace(/```[a-z]*\n?/gi, '').replace(/```/g, '').trim()
+        : responseText;
+      parsed = JSON5.parse(raw);
     }
 
-    if (!parsed || typeof parsed !== 'object' || !parsed.action || !isValidAIActionResponse(parsed)) {
+    if (!parsed || typeof parsed !== 'object' || !isValidAIActionResponse(parsed)) {
+      const reason = !parsed ? 'null' : typeof parsed !== 'object' ? 'not-object' : 'validation-failed';
+      console.warn(`AI response ${reason}:`, parsed);
       return {
         action: 'WAIT',
-        reason: 'Received malformed AI response; waiting before retrying.',
-        reasoningSteps: ['Parsed response validation failed', 'Applying safe recovery', 'Retrying on next tick'],
-        learningNote: 'AI output was malformed; system is preserving world integrity.',
+        reason: `AI response ${reason}; retrying next cycle.`,
+        reasoningSteps: ['Response validation failed', 'Safe recovery', 'Retry on next tick'],
+        learningNote: `AI output was malformed (${reason}).`,
         knowledgeCategory: 'Synthesis',
         taskLabel: 'Recovery Mode',
-        outcomeSummary: 'AI failed to produce a valid plan or reasoning summary.',
-        connectivityConfirmation: 'Connectivity cannot be confirmed when the AI output is invalid.',
+        outcomeSummary: 'AI produced invalid output.',
+        connectivityConfirmation: 'Cannot confirm connectivity with invalid output.',
         groundingLinks: []
       } as AIActionResponse;
     }
@@ -603,14 +588,11 @@ export async function decideNextAction(params: DecideNextActionParams): Promise<
       }));
     }
 
-    const validPlan = parsed.plan && isArchitecturallyCoherentPlan(parsed.plan) ? parsed.plan : undefined;
-    if (parsed.plan && !validPlan) {
-      console.warn('AI returned plan that failed architectural coherence checks; plan discarded.', { parsedPlan: parsed.plan });
-    }
+    const validPlan = parsed.plan && isValidConstructionPlan(parsed.plan) ? parsed.plan : undefined;
 
     const autoConnectivity = parsed.plan && Array.isArray(parsed.plan.steps)
       ? computePlanConnectivitySummary(parsed.plan)
-      : 'No connectivity confirmation available without a plan.';
+      : 'Single action.';
 
     return {
       ...parsed,
@@ -620,16 +602,16 @@ export async function decideNextAction(params: DecideNextActionParams): Promise<
       connectivityConfirmation: parsed.connectivityConfirmation || autoConnectivity
     } as AIActionResponse;
   } catch (error) {
-    console.error("Architect-OS Neural Fault:", error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const msg = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Agent AI decision error:', msg);
     return {
       action: 'WAIT',
-      reason: `Neural desync: ${errorMessage}`,
-      reasoningSteps: ["Connection failure detected", "Re-routing synthesis request", "Flushing instruction cache"],
-      learningNote: "Logic gate misalignment detected during planning phase.",
+      reason: `Error: ${msg}`,
+      reasoningSteps: ['Error detected', 'Safe recovery', 'Retry next cycle'],
+      learningNote: `AI fault: ${msg}`,
       knowledgeCategory: 'Synthesis',
-      taskLabel: "Recalibrating...",
-      connectivityConfirmation: 'Connectivity check unavailable due to runtime error.'
+      taskLabel: 'Recovering...',
+      connectivityConfirmation: 'Connectivity unavailable due to error.'
     };
   }
 }
